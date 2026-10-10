@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>老人智能药盒</title>
+<style>
+/* ═══════════════ 基础 ═══════════════ */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: #1a1a1a;
+  background: #eef0f3;
+  line-height: 1.5;
+}
+h1, h2, h3 { margin: 0; }
+button { font-family: inherit; cursor: pointer; }
+
+/* 顶部栏 */
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 20px; background: #fff; border-bottom: 2px solid #d6dae0;
+}
+.topbar .brand { font-weight: 700; font-size: 18px; }
+.topbar .spacer { flex: 1; }
+.topbar a.switch {
+  color: #0b5cad; font-size: 15px; text-decoration: none;
+  border: 2px solid #0b5cad; border-radius: 6px; padding: 6px 14px;
+}
+.topbar a.switch:hover { background: #e8f1fb; }
+
+/* 老人端连顶栏一起放大——否则"按钮高≥64px"这条在切换链接上就破了 */
+body.elder-mode .topbar { padding: 14px 20px; }
+body.elder-mode .topbar .brand { font-size: 24px; }
+body.elder-mode .topbar a.switch {
+  display: inline-flex; align-items: center; font-size: 22px;
+  min-height: 64px; padding: 0 22px; border-width: 3px; border-radius: 10px;
+}
+
+/* 铃铛 */
+.bell { position: relative; }
+.bell > button {
+  font-size: 15px; padding: 6px 14px; border: 2px solid #d6dae0;
+  background: #fff; border-radius: 6px; min-height: 38px;
+}
+.bell .count {
+  display: inline-block; min-width: 22px; margin-left: 6px; padding: 0 6px;
+  background: #c62828; color: #fff; border-radius: 11px;
+  font-size: 13px; font-weight: 700; text-align: center;
+}
+.bell .count.zero { background: #9aa3ad; }
+.bell .panel {
+  display: none; position: absolute; right: 0; top: 46px; z-index: 40;
+  width: 380px; max-height: 420px; overflow: auto;
+  background: #fff; border: 2px solid #d6dae0; border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.14); padding: 10px;
+}
+.bell .panel.open { display: block; }
+.bell .panel .empty { color: #5a5a5a; padding: 10px; }
+.bell .panel .note {
+  display: flex; gap: 10px; padding: 10px; border-bottom: 1px solid #eceff2;
+}
+.bell .panel .note:last-child { border-bottom: 0; }
+.bell .panel .note .dot { color: #c62828; font-weight: 700; }
+.bell .panel .note .when { color: #5a5a5a; font-size: 13px; }
+
+/* 布局 */
+.wrap { max-width: 900px; margin: 0 auto; padding: 20px; }
+.view { display: none; }
+.view.active { display: block; }
+.card {
+  background: #fff; border: 2px solid #d6dae0; border-radius: 10px;
+  padding: 18px; margin-bottom: 16px;
+}
+.card > h2 { font-size: 17px; margin-bottom: 12px; }
+
+/* 通用按钮 */
+.btn {
+  font-size: 15px; padding: 9px 18px; min-height: 40px;
+  border: 2px solid #0b5cad; background: #0b5cad; color: #fff;
+  border-radius: 6px; font-weight: 600;
+}
+.btn:hover { background: #094a8c; }
+.btn.ghost { background: #fff; color: #0b5cad; }
+.btn.ghost:hover { background: #e8f1fb; }
+.btn.gray { background: #fff; color: #3a3f45; border-color: #b9c0c8; }
+.btn.gray:hover { background: #eff1f4; }
+.btn:disabled {
+  background: #d3d7dc; border-color: #d3d7dc; color: #7b828a; cursor: not-allowed;
+}
+.btn.danger { background: #fff; color: #c62828; border-color: #c62828; }
+.btn.danger:hover { background: #fdecea; }
+
+/* ═══════════════ 子女端 ═══════════════ */
+.rawtext {
+  white-space: pre-wrap; background: #f7f8fa; border: 2px solid #e2e6ea;
+  border-radius: 6px; padding: 12px; font-size: 14px; color: #333;
+  font-family: "Consolas", "Courier New", monospace;
+}
+.banner {
+  padding: 12px 14px; border-radius: 6px; margin-bottom: 14px;
+  border: 2px solid; font-size: 15px;
+}
+.banner.err { background: #fdecea; border-color: #c62828; color: #8c1c1c; }
+.banner.ok  { background: #e8f5ec; border-color: #1b6b3a; color: #14562e; }
+.banner.info{ background: #e8f1fb; border-color: #0b5cad; color: #094a8c; }
+
+.item {
+  border: 2px solid #d6dae0; border-radius: 8px; padding: 14px;
+  margin-bottom: 14px; background: #fcfcfd;
+}
+.item > .head {
+  font-weight: 700; font-size: 15px; margin-bottom: 10px; color: #3a3f45;
+}
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field.full { grid-column: 1 / -1; }
+.field > label { font-size: 14px; font-weight: 600; color: #3a3f45; }
+.field input, .field select {
+  font-size: 15px; padding: 8px 10px; min-height: 40px;
+  border: 2px solid #c2c8cf; border-radius: 6px; background: #fff;
+  font-family: inherit; color: #1a1a1a; width: 100%;
+}
+.field input:focus, .field select:focus { outline: 3px solid #b8d4f0; }
+.field.has-error input, .field.has-error select { border-color: #c62828; background: #fffafa; }
+.field.has-warn input, .field.has-warn select { border-color: #d99b00; background: #fffdf5; }
+
+.issue { font-size: 13px; margin-top: 2px; }
+.issue.blocking { color: #c62828; font-weight: 600; }
+.issue.soft { color: #8a6100; }
+
+.confirm-bar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px; background: #f7f8fa; border: 2px solid #e2e6ea; border-radius: 8px;
+}
+.confirm-bar .hint { font-size: 15px; font-weight: 600; }
+.confirm-bar .hint.pending { color: #c62828; }
+.confirm-bar .hint.ready { color: #1b6b3a; }
+.confirm-bar .btn { min-height: 48px; font-size: 16px; padding: 10px 26px; }
+
+/* ═══════════════ 老人端 ═══════════════ */
+/* 约束：正文 ≥22px、按钮 ≥64px 高、高对比、状态用「颜色+符号+文字」三重编码 */
+.view-elder { font-size: 22px; }
+.view-elder .clockbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; background: #fff; border: 3px solid #c2c8cf;
+  border-radius: 12px; padding: 16px 22px; margin-bottom: 18px;
+}
+.view-elder .clock { font-size: 44px; font-weight: 700; letter-spacing: 1px; }
+.view-elder .clock-sub { font-size: 22px; color: #3a3f45; }
+.view-elder .slot {
+  background: #fff; border: 3px solid #d6dae0; border-radius: 12px;
+  padding: 16px; margin-bottom: 18px;
+}
+.view-elder .slot.current { border-color: #0b5cad; border-width: 4px; background: #f4f9ff; }
+.view-elder .slot-head {
+  display: flex; align-items: baseline; gap: 12px;
+  font-size: 26px; font-weight: 700; margin-bottom: 14px; padding-bottom: 10px;
+  border-bottom: 2px solid #e2e6ea;
+}
+.view-elder .slot-head .tag {
+  font-size: 22px; font-weight: 700; color: #fff; background: #0b5cad;
+  border-radius: 6px; padding: 3px 12px;
+}
+.view-elder .dose {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  border: 2px solid #d6dae0; border-radius: 10px;
+  padding: 14px 16px; margin-bottom: 12px; background: #fff;
+}
+.view-elder .dose:last-child { margin-bottom: 0; }
+.view-elder .dose .info { flex: 1; min-width: 240px; }
+.view-elder .dose .name { font-size: 24px; }
+.view-elder .dose .amt { font-size: 34px; font-weight: 700; letter-spacing: .5px; }
+.view-elder .dose .sched { font-size: 22px; color: #5a5a5a; }
+.view-elder .status {
+  font-size: 22px; font-weight: 700; padding: 6px 14px;
+  border-radius: 8px; border: 2px solid; white-space: nowrap;
+}
+.view-elder .take {
+  font-size: 24px; font-weight: 700; min-height: 68px; min-width: 150px;
+  padding: 0 26px; border-radius: 10px;
+  border: 3px solid #1b6b3a; background: #1b6b3a; color: #fff;
+}
+.view-elder .take:hover { background: #14562e; }
+.view-elder .take.choose { border-color: #c62828; background: #c62828; }
+.view-elder .take.choose:hover { background: #a31f1f; }
+
+/* 状态三重编码：颜色 + 符号 + 文字 */
+.st-pending   { color: #3a3f45; border-color: #b9c0c8; background: #f2f3f5; }
+.st-taken     { color: #14562e; border-color: #1b6b3a; background: #e8f5ec; }
+.st-overdue   { color: #8c1c1c; border-color: #c62828; background: #fdecea; }
+.st-suspended { color: #3a4a5a; border-color: #6b7f95; background: #eef2f6; }
+.st-missed    { color: #8c1c1c; border-color: #c62828; background: #fdecea; }
+.dose.taken     { border-color: #1b6b3a; }
+.dose.overdue   { border-color: #c62828; border-width: 3px; }
+.dose.missed    { border-color: #c62828; }
+.dose.suspended { border-color: #6b7f95; }
+
+.view-elder .empty-day {
+  background: #fff; border: 3px dashed #c2c8cf; border-radius: 12px;
+  padding: 30px; text-align: center; color: #3a3f45;
+}
+.view-elder .bigrefresh {
+  font-size: 24px; font-weight: 700; min-height: 68px; padding: 0 30px;
+  border-radius: 10px; border: 3px solid #0b5cad; background: #fff; color: #0b5cad;
+}
+
+/* ═══════════════ 弹窗 ═══════════════ */
+.modal-bg {
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.55); padding: 20px; overflow: auto;
+}
+.modal-bg.open { display: flex; align-items: center; justify-content: center; }
+.modal {
+  background: #fff; border-radius: 14px; padding: 26px;
+  width: 100%; max-width: 620px; border: 4px solid #c62828;
+}
+.modal h3 { font-size: 30px; margin-bottom: 14px; }
+.modal .what { font-size: 30px; font-weight: 700; margin-bottom: 6px; }
+.modal .when { font-size: 22px; color: #5a5a5a; margin-bottom: 22px; }
+.modal .opt { margin-bottom: 14px; }
+.modal .opt button {
+  width: 100%; font-size: 26px; font-weight: 700; min-height: 84px;
+  border-radius: 12px; border: 3px solid; padding: 10px 18px; text-align: left;
+}
+.modal .opt .expl { font-size: 22px; color: #5a5a5a; margin-top: 5px; padding-left: 4px; }
+.modal .opt.a button { border-color: #6b7f95; background: #fff; color: #2b3a4a; }
+.modal .opt.b button { border-color: #1b6b3a; background: #1b6b3a; color: #fff; }
+.modal .opt.c button { border-color: #c62828; background: #fff; color: #8c1c1c; }
+.modal .more { font-size: 22px; color: #8c1c1c; font-weight: 700; margin-top: 6px; }
+
+/* ═══════════════ dev 工具区 ═══════════════ */
+.devbar { max-width: 900px; margin: 0 auto 40px; padding: 0 20px; }
+.devbar details {
+  background: #f7f8fa; border: 1px solid #d6dae0; border-radius: 6px;
+  padding: 6px 12px; font-size: 13px; color: #5a5a5a;
+}
+.devbar summary { cursor: pointer; user-select: none; }
+.devbar .row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 0 6px;
+}
+.devbar button, .devbar select {
+  font-size: 13px; padding: 5px 10px; border: 1px solid #b9c0c8;
+  background: #fff; border-radius: 5px; color: #3a3f45; min-height: 30px;
+}
+.devbar .sep { width: 1px; height: 22px; background: #d6dae0; }
+.devbar .state { color: #5a5a5a; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">老人智能药盒</span>
+  <span class="spacer"></span>
+  <span id="bellWrap" class="bell"></span>
+  <a class="switch" id="switchLink" href="?view=elder">切到老人端 →</a>
+</div>
+
+<div class="wrap">
+
+  <!-- ══════════ 子女端 ══════════ -->
+  <div class="view view-child" id="viewChild">
+    <div class="card">
+      <h2>① 拍下药盒</h2>
+      <p style="color:#5a5a5a;font-size:15px;margin:0 0 12px">
+        模拟拍照识别：点下面的按钮会返回一段固定的处方文字，再交给 AI 抽取用药计划。
+      </p>
+      <button class="btn" id="btnScan" style="font-size:16px;min-height:48px;padding:10px 26px">
+        📷 拍照 / 选择图片
+      </button>
+      <div id="scanState" style="margin-top:12px;font-size:15px;color:#0b5cad"></div>
+    </div>
+
+    <div class="card" id="cardRaw" hidden>
+      <h2>② 识别到的药盒文字</h2>
+      <div class="rawtext" id="rawText"></div>
+    </div>
+
+    <div class="card" id="cardPlan" hidden>
+      <h2>③ AI 抽取结果（请核对并补全）</h2>
+      <div id="planIssues"></div>
+      <div id="childItems"></div>
+      <div id="addRowWrap" style="margin-bottom:16px">
+        <button class="btn gray" id="btnAddRow">+ 手动添加一条药</button>
+      </div>
+      <div class="confirm-bar">
+        <button class="btn" id="btnConfirm">&nbsp;</button>
+        <span class="hint" id="confirmHint"></span>
+      </div>
+      <div id="confirmResult" style="margin-top:14px"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ 老人端 ══════════ -->
+  <div class="view view-elder" id="viewElder">
+    <div class="clockbar">
+      <div>
+        <div class="clock" id="elderClock">--:--</div>
+        <div class="clock-sub" id="elderSlot">加载中…</div>
+      </div>
+      <button class="bigrefresh" id="btnElderRefresh">🔄 刷新</button>
+    </div>
+    <div id="elderBody"></div>
+  </div>
+
+</div>
+
+<!-- 超时三选一 -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3>⚠ 这顿药还没吃</h3>
+    <div class="what" id="modalWhat"></div>
+    <div class="when" id="modalWhen"></div>
+    <div class="opt a"><button data-act="carried_out">🚶 我带着药出门了</button>
+      <div class="expl">本次先挂起，不算漏服，也不会通知子女</div></div>
+    <div class="opt b"><button data-act="make_up">💊 我现在补吃</button>
+      <div class="expl">记为已服用（补服），正常流转</div></div>
+    <div class="opt c"><button data-act="missed">✕ 今天这顿没吃</button>
+      <div class="expl">标记为漏服，并通知子女</div></div>
+    <div class="more" id="modalMore"></div>
+  </div>
+</div>
+
+<!-- dev 工具 -->
+<div class="devbar">
+  <details>
+    <summary>演示工具（dev）</summary>
+    <div class="row">
+      <span>虚拟时钟</span>
+      <button id="btnBack">− 120 分钟</button>
+      <button id="btnFwd">+ 120 分钟</button>
+      <span class="state" id="devClock"></span>
+    </div>
+    <div class="row">
+      <span>AI 返回模式</span>
+      <select id="selMode">
+        <option value="normal">normal（真实调用）</option>
+        <option value="missing_fields">missing_fields（缺字段）</option>
+        <option value="malformed">malformed（非法 JSON）</option>
+      </select>
+      <span class="sep"></span>
+      <button id="btnReset">重置全部状态</button>
+      <span class="state" id="devMsg"></span>
+    </div>
+  </details>
+</div>
+
+<script>
+'use strict';
+
+/* ═══════════════════ 通用工具 ═══════════════════ */
+
+const $ = id => document.getElementById(id);
+
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* 所有请求走同源相对路径，不受端口影响 */
+async function api(path, body) {
+  const opts = body === undefined
+    ? { method: 'GET' }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  let res, data = null;
+  try {
+    res = await fetch(path, opts);
+  } catch (e) {
+    return { ok: false, status: 0, data: { detail: '无法连接后端：' + e.message } };
+  }
+  try { data = await res.json(); } catch (e) { /* 无 body */ }
+  return { ok: res.ok, status: res.status, data };
+}
+
+const hm = iso => (iso || '').slice(11, 16);           // "2026-10-10T08:12" -> "08:12"
+const numOrNull = v => {
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;                 // 前端也不放 NaN 出去
+};
+const intOrNull = v => {
+  const n = numOrNull(v);
+  return n === null ? null : Math.trunc(n);
+};
+
+/* ═══════════════════ 视图切换 ═══════════════════ */
+
+let CURRENT_VIEW = 'child';
+
+function setView(v) {
+  CURRENT_VIEW = (v === 'elder') ? 'elder' : 'child';
+  document.body.classList.toggle('elder-mode', CURRENT_VIEW === 'elder');
+  $('viewChild').classList.toggle('active', CURRENT_VIEW === 'child');
+  $('viewElder').classList.toggle('active', CURRENT_VIEW === 'elder');
+  $('switchLink').textContent = CURRENT_VIEW === 'child' ? '切到老人端 →' : '← 切回子女端';
+  $('switchLink').href = CURRENT_VIEW === 'child' ? '?view=elder' : '?view=child';
+  $('bellWrap').style.display = CURRENT_VIEW === 'child' ? '' : 'none';
+
+  if (CURRENT_VIEW === 'elder') {
+    refreshElder();          // 里面会顺带刷新铃铛
+  } else {
+    refreshBell();
+  }
+}
+
+/* ═══════════════════ 子女端：拍照 → 解析 ═══════════════════ */
+
+let PLAN_ID = null;    // 当前 draft 的 plan_id，confirm 时拼 URL 用
+let LAST_ITEMS = [];   // 最近一次渲染表单用的 items（含 *_raw，供重新校验时回传）
+let LAST_ISSUES = [];  // 最近一次渲染表单用的 issues
+let LAST_AI_RAW = '';  // 最近一次 AI 原始返回（演示异常路径时排查用）
+
+async function doScan() {
+  const btn = $('btnScan'), st = $('scanState');
+  btn.disabled = true;
+  st.textContent = '识别中…';
+
+  const scan = await api('/api/ocr/scan', {});
+  if (!scan.ok) {
+    st.textContent = '拍照识别失败';
+    btn.disabled = false;
+    return;
+  }
+  $('rawText').textContent = scan.data.raw_text;
+  $('cardRaw').hidden = false;
+
+  st.textContent = '正在交给 AI 抽取用药计划…';
+  const parsed = await api('/api/parse', { raw_text: scan.data.raw_text });
+  btn.disabled = false;
+
+  if (!parsed.ok) {
+    st.textContent = '解析请求失败（HTTP ' + parsed.status + '）';
+    return;
+  }
+  st.textContent = '识别完成';
+  $('cardPlan').hidden = false;
+  $('confirmResult').innerHTML = '';
+  PLAN_ID = parsed.data.plan_id;          // confirm 要用它拼 URL
+  LAST_AI_RAW = parsed.data.ai_debug_raw || '';
+  renderChildForm(parsed.data.items || [], parsed.data.issues || []);
+}
+
+function issueFor(issues, idx, field) {
+  return issues.filter(x => x.item_index === idx && x.field === field);
+}
+
+function renderChildForm(items, issues) {
+  LAST_ITEMS = items;
+  LAST_ISSUES = issues;
+
+  /* 计划级 issue（item_index 为 null）——比如"没解析出任何药品" */
+  const planIssues = issues.filter(x => x.item_index === null || x.item_index === undefined);
+  const banners = planIssues.map(x =>
+    `<div class="banner ${x.blocking ? 'err' : 'info'}" data-plan-blocking="${x.blocking ? 1 : 0}">`
+    + `${x.blocking ? '⛔' : 'ℹ'} ${esc(x.message)}</div>`).join('');
+  /* AI 原始返回留个折叠入口，专门给演示异常路径时看"它到底返回了什么" */
+  const raw = LAST_AI_RAW
+    ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;font-size:13px;color:#5a5a5a">
+         AI 原始返回（排查用）</summary>
+         <div class="rawtext" style="margin-top:8px;max-height:220px;overflow:auto">${esc(LAST_AI_RAW)}</div>
+       </details>`
+    : '';
+  $('planIssues').innerHTML = banners + raw;
+
+  const box = $('childItems');
+  box.innerHTML = items.map((it, i) => itemHTML(it, i, issues)).join('');
+  if (!items.length) box.innerHTML = '';
+
+  box.querySelectorAll('input, select').forEach(el => {
+    el.addEventListener('input', updateConfirmBar);
+    el.addEventListener('change', updateConfirmBar);
+  });
+  updateConfirmBar();
+}
+
+function fieldHTML(idx, field, label, control, issues) {
+  const list = issueFor(issues, idx, field);
+  const blocking = list.some(x => x.blocking);
+  const cls = 'field' + (blocking ? ' has-error' : (list.length ? ' has-warn' : ''));
+  const msgs = list.map(x =>
+    `<div class="issue ${x.blocking ? 'blocking' : 'soft'}" data-blocking="${x.blocking ? 1 : 0}">`
+    + `${x.blocking ? '⛔' : '⚠'} ${esc(x.message)}</div>`).join('');
+  return `<div class="${cls}">
+    <label>${esc(label)}</label>
+    ${control}
+    ${msgs}
+  </div>`;
+}
+
+function itemHTML(it, i, issues) {
+  const v = x => esc(x === null || x === undefined ? '' : x);
+  const freq = Number.isInteger(it.times_per_day) ? it.times_per_day : '';
+  const opts = [1,2,3,4].map(n =>
+    `<option value="${n}"${String(freq) === String(n) ? ' selected' : ''}>每日 ${n} 次</option>`).join('');
+
+  return `<div class="item" data-idx="${i}"
+       data-freq-raw="${esc(it.frequency_raw || '')}"
+       data-dur-raw="${esc(it.duration_raw || '')}">
+    <div class="head">药 ${i + 1}</div>
+    <div class="grid">
+      ${fieldHTML(i, 'name', '药名', `<input data-field="name" value="${v(it.name)}" placeholder="例如：阿莫西林胶囊">`, issues)}
+      ${fieldHTML(i, 'dose_unit', '剂量单位', `<input data-field="dose_unit" value="${v(it.dose_unit)}" placeholder="例如：g / mg / 粒 / 片">`, issues)}
+      ${fieldHTML(i, 'dose_amount', '单次剂量', `<input data-field="dose_amount" type="number" step="any" min="0" inputmode="decimal" value="${v(it.dose_amount)}" placeholder="例如：0.25">`, issues)}
+      ${fieldHTML(i, 'times_per_day', '每天几次',
+        `<select data-field="times_per_day"><option value="">请选择…</option>${opts}</select>`, issues)}
+      ${fieldHTML(i, 'duration_days', '疗程天数（可留空＝长期）',
+        `<input data-field="duration_days" type="number" step="1" min="1" inputmode="numeric" value="${v(it.duration_days)}" placeholder="留空表示长期服用">`, issues)}
+    </div>
+  </div>`;
+}
+
+/* 手动补一条：AI 完全没解析出药品时（malformed / 无 Key），
+   表单是空的、没有输入框，"强制人工补全"就无从下手。这个按钮是那条异常路径的出口。 */
+function addRow() {
+  const items = LAST_ITEMS.length ? collectItems() : [];
+  items.push({ name: null, dose_amount: null, dose_unit: null, times_per_day: null,
+               frequency_raw: '', duration_days: null, duration_raw: '' });
+  /* 原有各行的 issue 下标不变，新行在末尾、本来就没有 issue，沿用即可 */
+  renderChildForm(items, LAST_ISSUES);
+}
+
+function collectItems() {
+  return [...document.querySelectorAll('#childItems .item')].map(el => ({
+    name: (el.querySelector('[data-field=name]').value || '').trim() || null,
+    dose_amount: numOrNull(el.querySelector('[data-field=dose_amount]').value),
+    dose_unit: (el.querySelector('[data-field=dose_unit]').value || '').trim() || null,
+    times_per_day: intOrNull(el.querySelector('[data-field=times_per_day]').value),
+    frequency_raw: el.dataset.freqRaw || '',
+    duration_days: intOrNull(el.querySelector('[data-field=duration_days]').value),
+    duration_raw: el.dataset.durRaw || ''
+  }));
+}
+
+/* 实时重算「还有 N 项待补充」——纯前端即时反馈，真正的闸门在服务端 confirm */
+function updateConfirmBar() {
+  const rows = document.querySelectorAll('#childItems .item');
+  let remaining = 0;
+
+  document.querySelectorAll('#childItems .issue[data-blocking="1"]').forEach(msg => {
+    const wrap = msg.closest('.field');
+    const ctl = wrap ? wrap.querySelector('input, select') : null;
+    const filled = ctl ? String(ctl.value).trim() !== '' : true;
+    if (wrap) wrap.classList.toggle('has-error', !filled);
+    msg.hidden = filled;
+    if (!filled) remaining++;
+  });
+
+  /* 计划级 blocking（"没解析出药品"之类）：只要手工添了至少一条药，就算已解决。
+     0 条时按实际条数计，并让横幅露出来解释原因。 */
+  const planBanners = [...document.querySelectorAll('#planIssues .banner[data-plan-blocking="1"]')];
+  planBanners.forEach(b => { b.hidden = rows.length > 0; });
+  if (rows.length === 0) remaining += (planBanners.length || 1);
+
+  const btn = $('btnConfirm'), hint = $('confirmHint');
+  btn.disabled = remaining > 0;
+  btn.textContent = remaining > 0 ? '确认并生效（暂不可点）' : '确认并生效';
+  hint.className = 'hint ' + (remaining > 0 ? 'pending' : 'ready');
+  hint.textContent = remaining > 0
+    ? `还有 ${remaining} 项待补充`
+    : '补全完成，可以确认';
+}
+
+async function doConfirm() {
+  const btn = $('btnConfirm');
+  btn.disabled = true;
+  const items = collectItems();
+  const res = await api('/api/plans/' + encodeURIComponent(PLAN_ID || '') + '/confirm', { items });
+
+  const box = $('confirmResult');
+  if (res.ok) {
+    box.innerHTML = `<div class="banner ok">✅ 用药计划已生效。
+      老人端现在可以看到今天的药了。<a href="?view=elder">去看老人端 →</a></div>`;
+    renderChildForm(res.data.items || [], res.data.issues || []);
+  } else if (res.status === 400 && res.data && res.data.issues) {
+    box.innerHTML = `<div class="banner err">⛔ ${esc(res.data.detail || '仍有必填项未补全')}</div>`;
+    renderChildForm(items, res.data.issues);
+  } else {
+    box.innerHTML = `<div class="banner err">⛔ 确认失败：${esc((res.data && res.data.detail) || ('HTTP ' + res.status))}</div>`;
+    updateConfirmBar();
+  }
+}
+
+/* ═══════════════════ 老人端 ═══════════════════ */
+
+let ELDER = null;          // /api/doses/today 的响应
+let CLOCK_OFFSET = 0;      // 服务端虚拟时钟 - 浏览器时钟
+
+const STATUS_ICON = {
+  pending:   '○ 待服用',
+  taken:     '✓ 已服用',
+  overdue:   '⚠ 已超时',
+  suspended: '⊘ 已带出（不计漏服）',
+  missed:    '✕ 已漏服'
+};
+
+async function refreshElder() {
+  const r = await api('/api/doses/today');
+  if (!r.ok) {
+    $('elderBody').innerHTML = `<div class="empty-day">读取失败（HTTP ${r.status}）</div>`;
+    return;
+  }
+  ELDER = r.data;
+  CLOCK_OFFSET = new Date(ELDER.now).getTime() - Date.now();
+  renderElder();
+  tickClock();
+  await refreshBell();
+  showOverdueIfAny();
+}
+
+function renderElder() {
+  $('elderSlot').textContent = '现在是「' + ELDER.current_slot_label + '」时段的药';
+  const total = ELDER.slots.reduce((n, g) => n + g.doses.length, 0);
+
+  if (total === 0) {
+    $('elderBody').innerHTML = `<div class="empty-day">
+      今天还没有用药计划。<br>请先在<a href="?view=child">子女端</a>拍照并确认。
+      <div style="margin-top:20px"><button class="bigrefresh" onclick="refreshElder()">🔄 刷新</button></div>
+    </div>`;
+    return;
+  }
+
+  $('elderBody').innerHTML = ELDER.slots.map(g => {
+    if (!g.doses.length) return '';
+    return `<div class="slot${g.is_current ? ' current' : ''}">
+      <div class="slot-head">
+        <span>${esc(g.label)}</span>
+        <span style="font-size:22px;color:#5a5a5a;font-weight:400">${esc(g.at)}</span>
+        ${g.is_current ? '<span class="tag">现在</span>' : ''}
+      </div>
+      ${g.doses.map(doseHTML).join('')}
+    </div>`;
+  }).join('');
+}
+
+function doseHTML(d) {
+  const st = d.status;
+  const label = st === 'taken' && d.taken_at
+    ? `✓ 已服用 ${hm(d.taken_at)}`
+    : STATUS_ICON[st] || st;
+
+  let action = '';
+  if (st === 'pending') {
+    action = `<button class="take" data-take="${esc(d.id)}">已服用</button>`;
+  } else if (st === 'overdue') {
+    action = `<button class="take choose" data-choose="${esc(d.id)}">选择处理方式</button>`;
+  }
+
+  return `<div class="dose ${esc(st)}">
+    <div class="info">
+      <div class="name">${esc(d.name)}</div>
+      <div class="amt">${esc(d.dose_text)}</div>
+      <div class="sched">原定时间 ${hm(d.scheduled_at)}${d.frequency_raw ? ' · ' + esc(d.frequency_raw) : ''}</div>
+    </div>
+    <div class="status st-${esc(st)}">${esc(label)}</div>
+    ${action}
+  </div>`;
+}
+
+function tickClock() {
+  const t = new Date(Date.now() + CLOCK_OFFSET);
+  const p = n => String(n).padStart(2, '0');
+  $('elderClock').textContent = `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`;
+}
+
+async function takeDose(id) {
+  const r = await api('/api/doses/' + encodeURIComponent(id) + '/take', {});
+  if (!r.ok) alert('打卡失败：' + ((r.data && r.data.detail) || ('HTTP ' + r.status)));
+  await refreshElder();
+}
+
+const ACT_TEXT = {
+  carried_out: '已带出，本次挂起（不计漏服）',
+  make_up: '已补服',
+  missed: '已标记漏服，并通知了子女'
+};
+
+async function resolveDose(id, action) {
+  const r = await api('/api/doses/' + encodeURIComponent(id) + '/resolve', { action });
+  if (!r.ok) alert('提交失败：' + ((r.data && r.data.detail) || ('HTTP ' + r.status)));
+  $('modalBg').classList.remove('open');
+  await refreshElder();
+}
+
+/* 超时弹窗：一次只弹一条，选完再弹下一条 */
+function showOverdueIfAny() {
+  if (!ELDER || !ELDER.overdue_doses || !ELDER.overdue_doses.length) {
+    $('modalBg').classList.remove('open');
+    return;
+  }
+  const d = ELDER.overdue_doses[0];
+  const rest = ELDER.overdue_doses.length - 1;
+  $('modalWhat').textContent = d.name + '  ' + d.dose_text;
+  $('modalWhen').textContent = '原定 ' + d.slot_label + ' ' + hm(d.scheduled_at) + ' 服用';
+  $('modalMore').textContent = rest > 0 ? `还有 ${rest} 条超时未处理` : '';
+  $('modalBg').dataset.dose = d.id;
+  $('modalBg').classList.add('open');
+}
+
+/* ═══════════════════ 通知铃铛（子女端） ═══════════════════ */
+
+async function refreshBell() {
+  const r = await api('/api/notifications');
+  if (!r.ok) return;
+  const n = r.data.count || 0;
+  $('bellWrap').innerHTML = `
+    <button id="btnBell">🔔 漏服通知 <span class="count${n ? '' : ' zero'}">${n}</span></button>
+    <div class="panel" id="bellPanel">
+      ${n ? r.data.items.map(x =>
+          `<div class="note"><span class="dot">⚠</span>
+             <div>${esc(x.text)}<div class="when">${esc(hm(x.created_at))}</div></div>
+           </div>`).join('')
+           : '<div class="empty">暂无漏服通知</div>'}
+    </div>`;
+  $('btnBell').addEventListener('click', () => $('bellPanel').classList.toggle('open'));
+}
+
+/* ═══════════════════ dev 工具 ═══════════════════ */
+
+async function refreshDevState() {
+  const h = await api('/api/health');
+  if (!h.ok) return;
+  $('devClock').textContent = '虚拟时钟 ' + String(h.data.now).slice(11, 16)
+    + '（偏移 ' + h.data.clock_offset_minutes + ' 分）'
+    + (h.data.api_key_configured ? '' : ' · 未配置 API Key');
+  $('selMode').value = h.data.parse_mode;
+}
+
+async function advance(min) {
+  await api('/api/dev/advance_time', { minutes: min });
+  $('devMsg').textContent = '时钟已调整';
+  await refreshDevState();
+  if (CURRENT_VIEW === 'elder') await refreshElder();
+}
+
+async function setMode(m) {
+  await api('/api/dev/parse_mode', { mode: m });
+  $('devMsg').textContent = 'AI 模式 = ' + m;
+  await refreshDevState();
+}
+
+async function doReset() {
+  await api('/api/dev/reset', {});
+  PLAN_ID = null; LAST_ITEMS = []; LAST_ISSUES = []; LAST_AI_RAW = '';
+  $('cardRaw').hidden = true;
+  $('cardPlan').hidden = true;
+  $('scanState').textContent = '';
+  $('confirmResult').innerHTML = '';
+  $('childItems').innerHTML = '';
+  $('planIssues').innerHTML = '';
+  $('devMsg').textContent = '已重置';
+  await refreshDevState();
+  await refreshBell();
+  if (CURRENT_VIEW === 'elder') await refreshElder();
+}
+
+async function setModeFromSelect() { await setMode($('selMode').value); }
+
+/* ═══════════════════ 启动 ═══════════════════ */
+
+function init() {
+  const v = new URLSearchParams(location.search).get('view');
+  setView(v === 'elder' ? 'elder' : 'child');
+
+  $('btnScan').addEventListener('click', doScan);
+  $('btnAddRow').addEventListener('click', addRow);
+  $('btnConfirm').addEventListener('click', doConfirm);
+  $('btnElderRefresh').addEventListener('click', refreshElder);
+  $('btnBack').addEventListener('click', () => advance(-120));
+  $('btnFwd').addEventListener('click', () => advance(120));
+  $('btnReset').addEventListener('click', doReset);
+  $('selMode').addEventListener('change', setModeFromSelect);
+
+  /* 弹窗按钮 */
+  $('modalBg').addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    resolveDose($('modalBg').dataset.dose, b.dataset.act);
+  });
+
+  /* 打卡 / 选择处理方式（事件委托） */
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-take]');
+    if (t) { takeDose(t.dataset.take); return; }
+    const c = e.target.closest('[data-choose]');
+    if (c) { showOverdueIfAny(); }
+  });
+
+  setInterval(tickClock, 1000);
+  refreshDevState();
+}
+
+init();
+</script>
+</body>
+</html>
