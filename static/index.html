@@ -499,7 +499,8 @@ function itemHTML(it, i, issues) {
   return `<div class="item" data-idx="${i}"
        data-freq-raw="${esc(it.frequency_raw || '')}"
        data-dur-raw="${esc(it.duration_raw || '')}">
-    <div class="head">药 ${i + 1}</div>
+    <div class="head">药 ${i + 1}<button type="button" onclick="delRow(${i})"
+         style="float:right;color:#c62828;border:1px solid #f0b9b5;background:#fdecea;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;line-height:1.5;cursor:pointer">✕ 删除</button></div>
     <div class="grid">
       ${fieldHTML(i, 'name', '药名', `<input data-field="name" value="${v(it.name)}" placeholder="例如：阿莫西林胶囊">`, issues)}
       ${fieldHTML(i, 'dose_unit', '剂量单位', `<input data-field="dose_unit" value="${v(it.dose_unit)}" placeholder="例如：g / mg / 粒 / 片">`, issues)}
@@ -520,6 +521,23 @@ function addRow() {
                frequency_raw: '', duration_days: null, duration_raw: '' });
   /* 原有各行的 issue 下标不变，新行在末尾、本来就没有 issue，沿用即可 */
   renderChildForm(items, LAST_ISSUES);
+}
+
+/* 删掉一行。删完必须把 LAST_ISSUES 里的 item_index 一起往前搬——
+   否则警告会挂到删除后错位的行上（删了药 2，药 3 的红框就会跑到药 2 身上）。 */
+function delRow(idx) {
+  const items = LAST_ITEMS.length ? collectItems() : [];
+  if (items.length <= 1) { alert('至少要保留一条药品'); return; }
+
+  items.splice(idx, 1);
+  LAST_ISSUES = LAST_ISSUES
+    /* 被删那行自己的 issue 一起删掉；计划级 issue（item_index 为 null）不受影响 */
+    .filter(x => x.item_index !== idx)
+    /* 上面已经滤掉 === idx，所以剩下的不是前面几行、就是后面几行——只有后面的前移一位 */
+    .map(x => (x.item_index === null || x.item_index === undefined || x.item_index < idx)
+      ? x
+      : Object.assign({}, x, { item_index: x.item_index - 1 }));
+  renderChildForm(items, LAST_ISSUES);   // 末尾会自动调 updateConfirmBar
 }
 
 function collectItems() {

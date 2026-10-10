@@ -36,6 +36,34 @@ from pydantic import BaseModel
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
+ENV_FILE = os.path.join(APP_DIR, ".env")
+
+
+def _load_dotenv(path: str) -> None:
+    """把 .env 里的键值对读进 os.environ。
+
+    手写而不引 python-dotenv：只有十几行，省掉一个依赖，也省掉
+    "忘了 pip install 导致服务起不来"这类问题。真实环境变量优先，
+    所以 export 过的值会盖住 .env，符合 dotenv 惯例。
+    """
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8-sig") as fh:   # utf-8-sig：容忍记事本存出来的 BOM
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            if key.startswith("export "):          # 容忍 shell 写法
+                key = key[len("export "):].strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]                # 去掉成对引号
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+_load_dotenv(ENV_FILE)
 
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
@@ -171,8 +199,24 @@ _FAKE_AI_RESULT = {
 }
 
 
+class DeepSeekError(RuntimeError):
+    """DeepSeek 调用失败。message 一定非空，可以直接拿去展示给用户。"""
+
+
+def _redact(text: str) -> str:
+    """万一报错信息里回显了 key，别让它进终端日志或前端。"""
+    if DEEPSEEK_API_KEY and DEEPSEEK_API_KEY in text:
+        return text.replace(DEEPSEEK_API_KEY, "sk-***")
+    return text
+
+
 async def _chat_completion(messages: List[dict]) -> str:
-    """单次 DeepSeek 调用。全服务唯一的对外网络出口。"""
+    """单次 DeepSeek 调用。全服务唯一的对外网络出口。
+
+    失败一律抛 DeepSeekError，message 里带上具体原因（状态码 / 错误 body /
+    异常类型），终端同时打一份完整日志。原来这里把 str(exc) 直接拼给前端，
+    碰到 str() 为空的异常（部分超时、TLS 握手失败就是）只剩一个光秃秃的冒号。
+    """
     payload = {
         "model": DEEPSEEK_MODEL,
         "messages": messages,
@@ -184,13 +228,43 @@ async def _chat_completion(messages: List[dict]) -> str:
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            f"{DEEPSEEK_BASE_URL}/chat/completions", headers=headers, json=payload
-        )
-        resp.raise_for_status()
+    url = f"{DEEPSEEK_BASE_URL}/chat/completions"
+
+    # trust_env=False：绕开系统代理设置。
+    # Windows 的「设置 → 网络 → 代理」是写在注册表里的。装过 Clash / v2ray 之类
+    # 又没开着时，httpx 会照着注册表把请求发给那个本地端口（例如
+    # https://127.0.0.1:7897），等于对一个不讲 TLS 的本地代理做 TLS 握手，报
+    # ConnectError: EOF occurred in violation of protocol——看着像 DeepSeek 挂了，
+    # 其实跟 API Key 毫无关系。curl 不读注册表，所以会出现"curl 能通、Python 不通"。
+    # 真要挂代理上网，把这里改回 True，或先设好 HTTPS_PROXY 再改。
+    try:
+        async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        print(f"[DeepSeek] 超时（30s）：{type(exc).__name__}: {exc!r}", flush=True)
+        raise DeepSeekError(f"请求超时（30 秒）。目标 {url}") from exc
+    except httpx.HTTPError as exc:
+        print(f"[DeepSeek] 网络错误：{type(exc).__name__}: {exc!r}", flush=True)
+        raise DeepSeekError(f"网络错误 {type(exc).__name__}：{exc}") from exc
+
+    if resp.status_code != 200:
+        body = _redact(resp.text[:500])
+        hint = {401: "API Key 无效，请重新生成",
+                402: "账户余额不足，请充值",
+                429: "请求过于频繁，稍后再试"}.get(resp.status_code, "")
+        print(f"[DeepSeek] HTTP {resp.status_code}"
+              f"（{hint or '见响应体'}）；响应体：{body}", flush=True)
+        raise DeepSeekError(f"HTTP {resp.status_code}"
+                            + (f"（{hint}）" if hint else "") + f"：{body}")
+
+    try:
         data = resp.json()
-    return data["choices"][0]["message"]["content"] or ""
+        return data["choices"][0]["message"]["content"] or ""
+    except Exception as exc:                    # 200，但结构不是预期的那样
+        body = _redact(resp.text[:500])
+        print(f"[DeepSeek] HTTP 200 但结构异常："
+              f"{type(exc).__name__}: {exc!r}；响应体：{body}", flush=True)
+        raise DeepSeekError(f"返回结构异常 {type(exc).__name__}：{exc}") from exc
 
 
 async def extract_plan_json(raw_text: str) -> dict:
@@ -227,8 +301,12 @@ async def extract_plan_json(raw_text: str) -> dict:
     for _ in range(2):  # 失败重试一次，第二次把错误信息回喂
         try:
             content = await _chat_completion(messages)
-        except Exception as exc:  # httpx 网络错 / 401 / 超时，都归到这里
-            out.update(code="ai_unreachable", message=f"调用 DeepSeek 失败：{exc}")
+        except Exception as exc:  # DeepSeekError / 其它意外，都归到这里
+            # 兜底：就算 str(exc) 是空的，也要让前端看到异常类型，不能再出现光秃秃的冒号
+            reason = str(exc).strip() or f"{type(exc).__name__}（异常信息为空）"
+            print(f"[DeepSeek] 调用失败：{type(exc).__name__}: {exc!r}", flush=True)
+            out.update(code="ai_unreachable",
+                       message=f"调用 DeepSeek 失败：{_redact(reason)}")
             return out
 
         out["debug_raw"] = content

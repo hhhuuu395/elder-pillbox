@@ -10,6 +10,22 @@
 
 ---
 
+## 核心设计：AI 打草稿，人来签字
+
+**AI 在医疗场景里只能是草稿，不能是终稿。**
+
+所以 AI 的职责被压得很窄——只负责把处方照片上的文字转成结构化字段，**不负责判断**。
+遇到「遵医嘱」「按说明书」这类它拿不准的写法，要求它老老实实留空（数值字段返回 `null`，
+原词存进 `frequency_raw` / `duration_raw`），绝不允许猜。**留空不是失败，编造才是。**
+
+AI 填完只是草稿。凡是存在空缺的地方，系统会标成警告、并且**卡住「确认并生效」按钮**，
+必须由子女补全了才能提交。人签字之后，这份药单才会出现在老人端。
+
+这条约束不是靠"相信模型"实现的，而是靠三道关卡硬拦下来的——详见
+[技术栈与架构](#技术栈与架构) 里的「三层防线」，以及下面的[核心设计决策](#核心设计决策)。
+
+---
+
 ## 技术栈与架构
 
 | 层 | 选型 | 说明 |
@@ -49,8 +65,12 @@ python -m venv .venv
 # source .venv/bin/activate && pip install -r requirements.txt  # Linux / macOS
 
 # 配置 DeepSeek Key（不配也能跑，见下面「无 Key 降级」）
-export DEEPSEEK_API_KEY=sk-xxxxxxxx
-# PowerShell:  $env:DEEPSEEK_API_KEY="sk-xxxxxxxx"
+cp .env.example .env
+# 然后用编辑器打开 .env，把 DEEPSEEK_API_KEY 那一行的值换成自己的真 key
+#
+# 程序启动时会自动读取项目根目录的 .env，不需要手动 export。
+# .env 已在 .gitignore 里，不会被提交。如果某个变量已经 export 到 shell 里，
+# 那个值优先，会盖住 .env 里的同名项。
 
 # 起服务
 ./.venv/Scripts/python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000
@@ -377,7 +397,7 @@ elder-pillbox/
 ├─ static/index.html 前端（单文件，HTML+CSS+原生 JS，不引框架）
 ├─ curl_checks.sh    后端链路自检脚本（32 项断言）
 ├─ requirements.txt  fastapi / uvicorn / httpx
-├─ .env.example      环境变量参考模板（程序不会自动读取它）
+├─ .env.example      环境变量模板：复制成 .env 并填上自己的 key（程序启动时自动读取 .env）
 ├─ .gitignore
 └─ README.md
 ```
