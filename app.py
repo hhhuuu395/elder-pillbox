@@ -714,6 +714,60 @@ async def get_plan(plan_id: str):
     return plan_view(plan)
 
 
+def _norm_name(name: Optional[str]) -> str:
+    """判重用的药名归一化：去首尾空白 + 全角转半角 + 统一小写。
+
+    到此为止——「布洛芬」和「布洛芬缓释胶囊」算不算同一种药交给用户判断，
+    代码不猜。
+    """
+    s = (name or "").strip()
+    s = "".join(
+        chr(ord(c) - 0xFEE0) if 0xFF01 <= ord(c) <= 0xFF5E    # 全角 ！-～ 转半角
+        else (" " if c == "　" else c)                     # 全角空格转普通空格
+        for c in s
+    )
+    return s.strip().lower()
+
+
+def _dup_key(item: dict) -> Optional[tuple]:
+    """语义判重键 = 药名（归一化） + 剂量 + 频次。
+
+    没有药名的行不参与判重——那种行会被校验器报成「未识别到药名」，
+    在这里再报一次「重复药品：」只会让人看不懂。
+    """
+    name = _norm_name(item.get("name"))
+    if not name:
+        return None
+    return (name, item.get("dose_amount"), item.get("dose_unit"), item.get("times_per_day"))
+
+
+def reject_duplicate_items(items: List[dict], plan_id: str) -> None:
+    """确认前的语义去重，两道关：本次提交内部、与已有生效计划之间。
+
+    为什么放在 confirm 而不是 ensure_doses 里：ensure_doses 是按
+    (plan, 条目下标) 幂等的，它挡不住「两个 plan 各有一条同名药」，
+    也不该由它来挡——重复药品是数据准入问题，不是展开问题。
+    """
+    seen: dict = {}
+    for it in items:
+        key = _dup_key(it)
+        if key is None:
+            continue
+        if key in seen:
+            raise HTTPException(
+                409, f"用药计划中存在重复药品：{it['name']}，请删除重复条目后重试")
+        seen[key] = it
+
+    for other in STATE["plans"].values():
+        if other["status"] != "active" or other["id"] == plan_id:
+            continue
+        for it in other.get("items") or []:
+            key = _dup_key(it)
+            if key is not None and key in seen:
+                raise HTTPException(
+                    409, f"{seen[key]['name']} 已在当前用药计划中，请勿重复添加")
+
+
 @app.post("/api/plans/{plan_id}/confirm")
 async def confirm_plan(plan_id: str, req: ConfirmReq):
     """子女确认：第二次校验（因为是人工编辑过的），通过才转 active 并展开今日 Dose。"""
@@ -724,6 +778,7 @@ async def confirm_plan(plan_id: str, req: ConfirmReq):
         raise HTTPException(409, "该计划已确认生效，不能重复确认")
 
     items = [normalize_item(x) for x in req.items]
+    reject_duplicate_items(items, plan_id)
     issues = validate_items(items, plan["raw_text"])
 
     plan["items"] = items
