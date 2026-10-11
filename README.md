@@ -170,7 +170,7 @@ cp .env.example .env
 | GET | `/api/notifications` | 漏服通知列表（倒序）+ `count` |
 | POST | `/api/dev/advance_time` | 演示用：虚拟时钟拨快/拨慢，body `{minutes}`，**可为负** |
 | POST | `/api/dev/parse_mode` | 演示用：注入 AI 异常，body `{mode}`：`normal` / `missing_fields` / `malformed` |
-| POST | `/api/dev/reset` | 演示用：清空全部内存状态（`parse_mode` 会保留） |
+| POST | `/api/dev/reset` | 演示用：清空全部内存状态（`parse_mode` 会一并重置回 `normal`，需重新选择） |
 
 ---
 
