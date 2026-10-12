@@ -945,3 +945,13 @@ async def set_parse_mode(req: ParseModeReq):
 async def reset():
     _reset_state()
     return {"ok": True, "parse_mode": STATE["parse_mode"]}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # 云平台（Zeabur 等）会注入 PORT，本地不给就用 8000。
+    # host 必须绑 0.0.0.0：绑 127.0.0.1 的话平台从容器外探不进来。
+    # 用 `uvicorn app:app` 启动时这一段不执行，两种跑法互不影响。
+    _port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=_port)
