@@ -1,0 +1,10 @@
+# .env 里是本机的真实 key。它被 .gitignore 挡在 git 之外，但 docker build 不读
+# .gitignore —— 少了这一行，key 会被 COPY 进镜像层，镜像发出去就再也收不回来。
+.env
+
+# 下面这些进镜像没意义，只会把镜像撑大
+.git
+.venv
+__pycache__/
+*.pyc
+*.pyo
